@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
+<style>
+:root{--paper:#F1F4F2;--ink:#14302E;--teal:#0E6B63;--line:#C9D5D1;--amber:#B27F00;--red:#B3372B}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font:16px/1.5 "Bricolage Grotesque",system-ui,sans-serif;background:var(--paper);color:var(--ink);display:grid;place-items:start center;padding:28px 16px}
+main{width:100%;max-width:640px}
+h1{font-size:2.4rem;line-height:1.05;font-weight:800;margin:0 0 6px}p.sub{margin:0 0 22px;max-width:46ch}
+.box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:10px}
+input,textarea,button{font:inherit;color:inherit}
+input,textarea{border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;background:#fff}
+button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:10px 14px;cursor:pointer}
+button.main{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}.msg{min-height:1.4em;font-size:.9rem}.msg.err{color:var(--red)}
+.task{border-top:1px solid var(--line);padding:12px 0}.task:first-child{border-top:0}.task small{display:block;opacity:.7}
+.s-pending,.s-running{color:var(--amber)}.s-done{color:var(--teal)}.s-failed{color:var(--red)}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}[hidden]{display:none!important}
+pre{white-space:pre-wrap;margin:6px 0 0;font:inherit}
+</style></head><body><main>
+<h1>Your agent,<br>one message away.</h1>
+<p class="sub">Create an account, send a task, and the agent running on your PC picks it up.</p>
+
+<section id="auth" class="box">
+  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="password" type="password" placeholder="Password (8+ characters)" autocomplete="current-password">
+  <div class="row"><button class="main" id="login">Log in</button><button id="signup">Create account</button></div>
+  <button id="google">Continue with Google</button>
+  <div id="amsg" class="msg" role="status"></div>
+</section>
+
+<section id="dash" hidden>
+  <div class="top"><span id="who"></span><button id="logout">Log out</button></div>
+  <div class="box">
+    <textarea id="cmd" rows="3" maxlength="4000" placeholder="What should the agent do?"></textarea>
+    <button class="main" id="send">Send task</button><div id="dmsg" class="msg" role="status"></div>
+  </div>
+  <div class="box" style="margin-top:14px" id="list"></div>
+</section>
+
+<script>
+// Fill these in from Supabase: Project Settings -> API. The anon key is safe to publish because row-level security protects the data.
+const SUPABASE_URL = 'https://ffyaozksfkeojpoglvot.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_gC2UjQngblXyLjr7FWJs7A_4yZeCr4E';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = (i) => document.getElementById(i);
+const say = (id, t, err) => { $(id).textContent = t; $(id).className = 'msg' + (err ? ' err' : ''); };
+let channel;
+
+async function render() {
+  const { data: { session } } = await sb.auth.getSession();
+  $('auth').hidden = !!session; $('dash').hidden = !session;
+  if (!session) { if (channel) sb.removeChannel(channel); return; }
+  $('who').textContent = session.user.email;
+  await loadTasks();
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel('tasks').on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, loadTasks).subscribe();
+}
+async function loadTasks() {
+  const { data } = await sb.from('tasks').select('*').order('created_at', { ascending: false }).limit(25);
+  const list = $('list'); list.replaceChildren();
+  if (!data || !data.length) { list.textContent = 'No tasks yet. Send your first one above.'; return; }
+  for (const t of data) {
+    const d = document.createElement('div'); d.className = 'task';
+    const c = document.createElement('div'); c.textContent = t.command;
+    const s = document.createElement('small'); s.className = 's-' + t.status; s.textContent = t.status + ' · ' + new Date(t.created_at).toLocaleString();
+    d.append(c, s);
+    if (t.result) { const p = document.createElement('pre'); p.textContent = t.result; d.append(p); }
+    list.append(d);
+  }
+}
+const creds = () => ({ email: $('email').value.trim(), password: $('password').value });
+$('login').onclick = async () => { const { error } = await sb.auth.signInWithPassword(creds()); say('amsg', error ? error.message : '', !!error); };
+$('signup').onclick = async () => {
+  const c = creds(); if (c.password.length < 8) return say('amsg', 'Use a password with at least 8 characters.', true);
+  const { data, error } = await sb.auth.signUp(c);
+  if (error) return say('amsg', error.message, true);
+  say('amsg', data.session ? '' : 'Check your email to confirm your account, then log in.');
+};
+$('google').onclick = () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+$('logout').onclick = () => sb.auth.signOut();
+$('send').onclick = async () => {
+  const command = $('cmd').value.trim(); if (!command) return say('dmsg', 'Type a task first.', true);
+  const { error } = await sb.from('tasks').insert({ command });
+  if (error) return say('dmsg', error.message, true);
+  $('cmd').value = ''; say('dmsg', 'Sent. Your PC will pick it up within a few seconds.'); loadTasks();
+};
+sb.auth.onAuthStateChange(render); render();
+</script></main></body></html>

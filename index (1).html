@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Agent</title>
+<style>
+:root{--paper:#F1F4F2;--ink:#14302E;--teal:#0E6B63;--line:#C9D5D1;--amber:#E0A100}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;display:flex;flex-direction:column;font:14px/1.45 "Bricolage Grotesque",system-ui,sans-serif;background:var(--paper);color:var(--ink)}
+header{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);-webkit-app-region:drag}
+header b{flex:1}.dot{width:9px;height:9px;border-radius:50%;background:var(--teal)}.dot.busy{background:var(--amber)}
+button,input,textarea{font:inherit;color:inherit}
+button{-webkit-app-region:no-drag;border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 9px;cursor:pointer}
+button.main{background:var(--teal);border-color:var(--teal);color:#fff}
+#log{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.m{padding:7px 10px;border-radius:8px;white-space:pre-wrap;max-width:92%}
+.user{align-self:flex-end;background:var(--teal);color:#fff}.agent{background:#fff;border:1px solid var(--line)}.tool{font-size:12px;opacity:.65}
+#drop{padding:6px 10px;font-size:12px;border-top:1px dashed var(--line);min-height:28px}
+#drop.over{background:#dfeae6}
+footer{padding:8px 10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+textarea{width:100%;resize:none;border:1px solid var(--line);border-radius:6px;padding:6px;background:#fff}
+.row{display:flex;gap:8px;align-items:center;font-size:12px}.row label{display:flex;gap:4px;align-items:center}
+#login{padding:16px;display:flex;flex-direction:column;gap:8px}input{border:1px solid var(--line);border-radius:6px;padding:7px;background:#fff}
+#err{color:#B3372B;font-size:12px}[hidden]{display:none!important}
+</style></head><body>
+<header><span class="dot" id="dot"></span><b>Agent</b><button id="hide" title="Ctrl+Shift+Space">Hide</button><button id="quit">Quit</button></header>
+<div id="login" hidden>
+  <b>Sign in</b><span style="font-size:12px">Use the account you created on your agent website.</span>
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button class="main" id="go">Sign in</button><div id="err"></div>
+</div>
+<div id="app" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">
+  <div id="log"></div>
+  <div id="drop">Drop files here to attach them</div>
+  <footer>
+    <textarea id="txt" rows="3" placeholder="Tell the agent what to do…"></textarea>
+    <div class="row"><button class="main" id="send">Send</button><button id="stop">Stop</button>
+      <label><input type="checkbox" id="scr"> Screen control</label>
+      <label>Opacity <input type="range" id="op" min="40" max="100" value="100" style="width:60px"></label>
+    </div>
+    <div class="row"><span id="who"></span><button id="out">Sign out</button></div>
+  </footer>
+</div>
+<script>
+const $=(i)=>document.getElementById(i);let files=[];
+const add=(t,k)=>{const d=document.createElement('div');d.className='m '+k;d.textContent=t;$('log').append(d);$('log').scrollTop=1e9};
+const show=async()=>{const s=await agent.state();$('login').hidden=!!s.email;$('app').hidden=!s.email;$('who').textContent=s.email||'';
+ $('scr').disabled=!s.screenAvailable;$('scr').title=s.screenAvailable?'':'Install optional dependency @nut-tree-fork/nut-js';$('dot').classList.toggle('busy',s.busy)};
+agent.onLog(m=>add(m.text,m.kind));
+$('go').onclick=async()=>{const r=await agent.signIn($('em').value,$('pw').value);$('err').textContent=r.error||'';show()};
+$('out').onclick=async()=>{await agent.signOut();show()};
+$('hide').onclick=()=>agent.hide();$('quit').onclick=()=>agent.quit();$('stop').onclick=()=>agent.stop();
+$('scr').onchange=async e=>{e.target.checked=await agent.setScreen(e.target.checked)};
+$('op').oninput=e=>agent.setOpacity(e.target.value/100);
+const send=async()=>{const t=$('txt').value.trim();if(!t)return;$('txt').value='';add(t+(files.length?`\n📎 ${files.length} file(s)`:''),'user');
+ const p=files;files=[];$('drop').textContent='Drop files here to attach them';$('dot').classList.add('busy');
+ const r=await agent.run(t,p);if(r==='Please sign in first.'||r.startsWith('Error'))add(r,'agent');$('dot').classList.remove('busy')};
+$('send').onclick=send;$('txt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}};
+['dragover','dragenter'].forEach(ev=>document.body.addEventListener(ev,e=>{e.preventDefault();$('drop').classList.add('over')}));
+['dragleave','drop'].forEach(ev=>document.body.addEventListener(ev,e=>{e.preventDefault();$('drop').classList.remove('over')}));
+document.body.addEventListener('drop',e=>{for(const f of e.dataTransfer.files)files.push(agent.pathFor(f));$('drop').textContent='Attached: '+files.map(p=>p.split(/[\\/]/).pop()).join(', ')});
+show();
+</script></body></html>
